@@ -1,4 +1,4 @@
-const int POT_IN = 0;
+const int POT_IN = 5;
 const int OUT = 9;
 
 void setup() {
@@ -16,5 +16,5 @@ void loop() {
 
   analogWrite(OUT, cur/4);
 
-  delay(30);
+  delay(60);
 }
