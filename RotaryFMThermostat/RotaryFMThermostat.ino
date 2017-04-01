@@ -6,6 +6,10 @@
 // RFM Libs
 #include <RFM69.h>
 #include <RFM69_ATC.h>
+// OLED
+#include <OLED_I2C_128x64_Monochrome.h>
+#include <Wire.h>
+#include <avr/pgmspace.h>
 
 // peripheral 
 #define BUTTON_PIN 3
@@ -35,6 +39,15 @@ volatile bool active = true;
 unsigned long oldMillis;
 int16_t last, value;
 
+// OLED
+const char LCD_Hyphen[] PROGMEM = "----------------";
+const char LCD_Text[] PROGMEM   = "THIS IS A STRING";
+bool displayOn = true;
+
+#define FILLARRAY(a,n) a[0]=n, memcpy( ((char*)a)+sizeof(a[0]), a, sizeof(a)-sizeof(a[0]) );
+
+bool updateMenu = false;
+
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(10);
@@ -53,16 +66,32 @@ void setup() {
   Timer1.initialize(1000);
   Serial.print("Observing button on Pin ");Serial.print(BUTTON_PIN);
   Serial.print(" (Interrupt ");Serial.print(BUTTON_INT);Serial.println(")");
+  
+  // OLED
+  lcd.initialize();
+  writeDisplay();
+  
   activate();
 }
 
 void loop() {
 
   if (active) {
+
+    if (!displayOn) {
+      writeDisplay();
+      lcd.setDisplayOn();
+      displayOn = true;
+    }
+    
     handleRotation();
     handleClick();
 
     receive();
+
+    if (updateMenu) {
+      writeDisplay();
+    }
     
     if (timedOut()) powerDown();
   }
@@ -77,6 +106,7 @@ void activate() {
   resetValue();
   resetMillis();
   active = true;
+  
   Serial.println("Active...");
 }
 
@@ -86,10 +116,31 @@ void activate() {
 void powerDown() {
   attachBtn();
   detachEncoder();
+  lcd.setDisplayOff();
   active = false;
+  displayOn = false;
   Serial.println("Sleep...");
   Serial.flush();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
+}
+
+void writeDisplay() {
+
+    long val = value;
+
+    lcd.printString("----------------", 0, 0);
+    byte x_offset = 5;
+    byte x_begin = 0;
+    for (x_begin;x_begin<x_offset;x_begin++) {
+      lcd.printString(".", x_begin, 3);
+    }
+    x_offset += lcd.printNumber(val, x_offset, 3);
+    for (x_offset;x_offset<16;x_offset++) {
+      lcd.printString(",", x_offset, 3);
+    }
+    lcd.printString("----------------", 0, 6);
+    updateMenu = false;
+  
 }
 
 /**
@@ -156,6 +207,7 @@ void handleRotation() {
     resetMillis();
     Serial.print("Encoder Value: ");
     Serial.println(value);
+    updateMenu = true;
   }
 }
 
@@ -234,4 +286,3 @@ void receive() {
     Serial.println();
   }
 }
-
