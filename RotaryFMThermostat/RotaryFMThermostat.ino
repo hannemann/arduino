@@ -44,7 +44,7 @@ unsigned long oldMillis;
 int16_t last, value;
 
 // OLED
-bool displayOn = true;
+bool displayOn = false;
 
 #define FILLARRAY(a,n) a[0]=n, memcpy( ((char*)a)+sizeof(a[0]), a, sizeof(a)-sizeof(a[0]) );
 
@@ -64,7 +64,7 @@ struct valve valves[MAX_VALVES];
 int valvesCount;
 
 // Menu
-SimpleMenu menu = SimpleMenu();
+SimpleMenu *menu = null;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -88,7 +88,6 @@ void setup() {
   // OLED
   lcd.initialize();
   lcd.rotateDisplay180();
-  writeDisplay();
   
   activate();
 }
@@ -98,6 +97,7 @@ void loop() {
   if (active) {
 
     if (!displayOn) {
+      menu = new SimpleMenu();
       writeDisplay();
       lcd.setDisplayOn();
       displayOn = true;
@@ -137,6 +137,7 @@ void powerDown() {
   attachBtn();
   detachEncoder();
   lcd.setDisplayOff();
+  delete menu;
   active = false;
   displayOn = false;
   Serial.println("Sleep...");
@@ -146,7 +147,7 @@ void powerDown() {
 
 void writeDisplay() {
 
-    long val = menu.index();
+    long val = menu->index();
 
     lcd.printString("----------------", 0, 0);
     byte x_offset = 5;
@@ -211,8 +212,8 @@ bool timedOut() {
  * reset encoder value
  */
 void resetValue() {
-  menu.index(0);
-  last = menu.index();
+  menu->index(0);
+  last = 0;
 }
 
 /**
@@ -220,13 +221,13 @@ void resetValue() {
  */
 void handleRotation() {
 
-  menu += encoder->getValue();
+  int index = (*menu) += encoder->getValue();
   
-  if (menu.index() != last) {
-    last = menu.index();
+  if (index != last) {
+    last = index;
     resetMillis();
     Serial.print("Encoder Value: ");
-    Serial.println(menu.index());
+    Serial.println(index);
     updateMenu = true;
   }
 }

@@ -1,11 +1,14 @@
 #include <Arduino.h>
 #include "SimpleMenu.h"
 
+SimpleMenu::SimpleMenu() {
+};
+
 SimpleMenu::~SimpleMenu() {
 	
 };
 
-void SimpleMenu::operator+=(int i) {
+int SimpleMenu::operator+=(int i) {
 	_index += i;
 	if (_index < 0) _index = 0;
 	return _index;
@@ -15,21 +18,17 @@ int SimpleMenu::index() {
 	return _index;
 }
 
-void SimpleMenu::index(int index) {
-	_index = index;
-}
-
-void SimpleMenu::addIndex(int index) {
-	index += index;
+void SimpleMenu::index(int i) {
+	_index = i;
 }
 
 void SimpleMenu::addItem(char *name) {
 	Serial.print("Add: ");
 	Serial.println(name);
 	struct SimpleMenuItem *item;
-	item->index = sizeof(this->items);
+	item->index = sizeof(items);
 	item->name = name;
-	this->items[sizeof(this->items)] = item;
+	items[sizeof(items)] = item;
 }
 
 struct SimpleMenuItem *SimpleMenu::item(int i) {
