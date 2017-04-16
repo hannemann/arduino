@@ -44,14 +44,16 @@ unsigned long oldMillis;
 int16_t last, value;
 
 // OLED
-bool displayOn = false;
+unsigned char DISPLAY_MODE = 0;
+const unsigned char DISPLAY_MODE_ON = 0x01;
+const unsigned char DISPLAY_MODE_UPDATE = 0x02;
 
 #define FILLARRAY(a,n) a[0]=n, memcpy( ((char*)a)+sizeof(a[0]), a, sizeof(a)-sizeof(a[0]) );
 
-bool updateMenu = false;
-
 unsigned char MODE = 0;
-const unsigned char MODE_GET_VALVES = 0x01;
+const unsigned char MODE_REQUEST_VALVES = 0x01;
+const unsigned char MODE_GET_VALVES = 0x02;
+const unsigned char MODE_HAS_VALVES = 0x04;
 
 const int MAX_VALVES = 20;
 struct valve {
@@ -96,19 +98,23 @@ void loop() {
 
   if (active) {
 
-    if (!displayOn) {
+    if (!(DISPLAY_MODE & DISPLAY_MODE_ON)) {
+      DISPLAY_MODE |= DISPLAY_MODE_ON;
       menu = new SimpleMenu();
       writeDisplay();
       lcd.setDisplayOn();
-      displayOn = true;
     }
     
     handleRotation();
     handleClick();
 
+    if (MODE & MODE_REQUEST_VALVES) {
+      requestValves();
+    }
+
     receive();
 
-    if (updateMenu) {
+    if (DISPLAY_MODE & DISPLAY_MODE_UPDATE) {
       writeDisplay();
     }
     
@@ -124,8 +130,8 @@ void activate() {
   attachEncoder();
   resetValue();
   resetMillis();
-  requestValves();
   active = true;
+  MODE |= MODE_REQUEST_VALVES;
   
   Serial.println("Active...");
 }
@@ -137,15 +143,22 @@ void powerDown() {
   attachBtn();
   detachEncoder();
   lcd.setDisplayOff();
+  MODE &= ~MODE_HAS_VALVES;
   delete menu;
   active = false;
-  displayOn = false;
+  DISPLAY_MODE &= ~DISPLAY_MODE_ON;
   Serial.println("Sleep...");
   Serial.flush();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
 }
 
 void writeDisplay() {
+
+  lcd.clearDisplay();
+
+  if (!(MODE & MODE_HAS_VALVES)) {
+    lcd.printString("...loading", 0, 0);
+  } else {
 
     long val = menu->index();
 
@@ -160,8 +173,9 @@ void writeDisplay() {
       lcd.printString(",", x_offset, 3);
     }
     lcd.printString("----------------", 0, 6);
+  }
 
-    updateMenu = false;
+  DISPLAY_MODE &= ~DISPLAY_MODE_UPDATE;
 }
 
 /**
@@ -228,7 +242,7 @@ void handleRotation() {
     resetMillis();
     Serial.print("Encoder Value: ");
     Serial.println(index);
-    updateMenu = true;
+    DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
   }
 }
 
@@ -276,6 +290,7 @@ void requestValves() {
   if (radio.sendWithRetry(GATEWAYID, payload, sizeof(payload))) {
     Serial.print("ok!");
   }
+  MODE &= ~MODE_REQUEST_VALVES;
 }
 
 // Radio
@@ -284,6 +299,12 @@ void receive() {
   if (radio.receiveDone())
   {
     resetMillis();
+    Serial.print("Data received: ");
+    for (byte i = 0; i < radio.DATALEN; i++) {
+      char c = (char)radio.DATA[i];
+      Serial.print(c);
+    }
+    Serial.println();
     if (radio.DATALEN == 1) {
       if (*COMMAND_GET_VALVES == (char)radio.DATA[0]) {
         Serial.println("Fetch valves...");
@@ -301,9 +322,12 @@ void receive() {
       payload[radio.DATALEN] = '\0';
 
       if (strcmp(payload, END_OF_TRANSMISSION) == 0) {
+        Serial.println("EOT");
         if (MODE & MODE_GET_VALVES) {
+          MODE &= ~MODE_GET_VALVES;
+          MODE |= MODE_HAS_VALVES;
+          DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
         }
-        MODE = 0;
       }
 
       if (MODE & MODE_GET_VALVES) {
