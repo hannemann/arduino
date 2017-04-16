@@ -9,7 +9,8 @@
 // OLED
 #include <OLED_I2C_128x64_Monochrome.h>
 #include <Wire.h>
-#include <avr/pgmspace.h>
+
+#include "SimpleMenu.h"
 
 // peripheral 
 #define BUTTON_PIN 3
@@ -18,7 +19,8 @@
 #define SERIAL_BAUD   115200
 
 // RFM69
-#define NODEID        1
+#define NODEID        3
+#define GATEWAYID     1
 #define NETWORKID     100
 #define FREQUENCY     RF69_433MHZ
 #define ENCRYPTKEY    "sampleEncryptKey" //exactly the same 16 characters/bytes on all nodes!
@@ -32,6 +34,8 @@
 bool promiscuousMode = false; //set to 'true' to sniff all packets on the same network
 byte ackCount=0;
 uint32_t packetCount = 0;
+const char* COMMAND_GET_VALVES = "V";
+const char* END_OF_TRANSMISSION = "EOT";
 
 // encoder
 ClickEncoder *encoder;
@@ -40,13 +44,27 @@ unsigned long oldMillis;
 int16_t last, value;
 
 // OLED
-const char LCD_Hyphen[] PROGMEM = "----------------";
-const char LCD_Text[] PROGMEM   = "THIS IS A STRING";
 bool displayOn = true;
 
 #define FILLARRAY(a,n) a[0]=n, memcpy( ((char*)a)+sizeof(a[0]), a, sizeof(a)-sizeof(a[0]) );
 
 bool updateMenu = false;
+
+unsigned char MODE = 0;
+const unsigned char MODE_GET_VALVES = 0x01;
+
+const int MAX_VALVES = 20;
+struct valve {
+  int addr;
+  char *name;
+  float wanted;
+  float real;
+};
+struct valve valves[MAX_VALVES];
+int valvesCount;
+
+// Menu
+SimpleMenu menu = SimpleMenu();
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -69,6 +87,7 @@ void setup() {
   
   // OLED
   lcd.initialize();
+  lcd.rotateDisplay180();
   writeDisplay();
   
   activate();
@@ -105,6 +124,7 @@ void activate() {
   attachEncoder();
   resetValue();
   resetMillis();
+  requestValves();
   active = true;
   
   Serial.println("Active...");
@@ -126,7 +146,7 @@ void powerDown() {
 
 void writeDisplay() {
 
-    long val = value;
+    long val = menu.index();
 
     lcd.printString("----------------", 0, 0);
     byte x_offset = 5;
@@ -139,8 +159,8 @@ void writeDisplay() {
       lcd.printString(",", x_offset, 3);
     }
     lcd.printString("----------------", 0, 6);
+
     updateMenu = false;
-  
 }
 
 /**
@@ -191,8 +211,8 @@ bool timedOut() {
  * reset encoder value
  */
 void resetValue() {
-  value = 0;
-  last = value;
+  menu.index(0);
+  last = menu.index();
 }
 
 /**
@@ -200,13 +220,13 @@ void resetValue() {
  */
 void handleRotation() {
 
-  value += encoder->getValue();
+  menu += encoder->getValue();
   
-  if (value != last) {
-    last = value;
+  if (menu.index() != last) {
+    last = menu.index();
     resetMillis();
     Serial.print("Encoder Value: ");
-    Serial.println(value);
+    Serial.println(menu.index());
     updateMenu = true;
   }
 }
@@ -246,43 +266,66 @@ void buttonIsr() {
   }
 }
 
+void requestValves() {
+  Serial.println("Requesting Valves");
+  String _payload;
+  _payload = "G/V";
+  char payload[_payload.length()+1];
+  _payload.toCharArray(payload, sizeof(payload));
+  if (radio.sendWithRetry(GATEWAYID, payload, sizeof(payload))) {
+    Serial.print("ok!");
+  }
+}
+
 // Radio
 void receive() {
   
   if (radio.receiveDone())
   {
-    Serial.print("#[");
-    Serial.print(++packetCount);
-    Serial.print(']');
-    Serial.print('[');Serial.print(radio.SENDERID, DEC);Serial.print("] ");
-    if (promiscuousMode)
-    {
-      Serial.print("to [");Serial.print(radio.TARGETID, DEC);Serial.print("] ");
+    resetMillis();
+    if (radio.DATALEN == 1) {
+      if (*COMMAND_GET_VALVES == (char)radio.DATA[0]) {
+        Serial.println("Fetch valves...");
+        struct valve valves[MAX_VALVES];
+        MODE |= MODE_GET_VALVES;
+        valvesCount = 0;
+      }
+    } else {
+
+      char payload[61];
+      for (byte i = 0; i < radio.DATALEN; i++) {
+        char c = (char)radio.DATA[i];
+        payload[i] = c;
+      }
+      payload[radio.DATALEN] = '\0';
+
+      if (strcmp(payload, END_OF_TRANSMISSION) == 0) {
+        if (MODE & MODE_GET_VALVES) {
+        }
+        MODE = 0;
+      }
+
+      if (MODE & MODE_GET_VALVES) {
+        parseValve(payload, valvesCount);
+        valvesCount++;
+      }
     }
-    for (byte i = 0; i < radio.DATALEN; i++)
-      Serial.print((char)radio.DATA[i]);
-    Serial.print("   [RX_RSSI:");Serial.print(radio.RSSI);Serial.print("]");
     
     if (radio.ACKRequested())
     {
-      byte theNodeID = radio.SENDERID;
       radio.sendACK();
-      Serial.print(" - ACK sent.");
-
-      // When a node requests an ACK, respond to the ACK
-      // and also send a packet requesting an ACK (every 3rd one only)
-      // This way both TX/RX NODE functions are tested on 1 end at the GATEWAY
-      if (ackCount++%3==0)
-      {
-        Serial.print(" Pinging node ");
-        Serial.print(theNodeID);
-        Serial.print(" - ACK...");
-        delay(3); //need this when sending right after reception .. ?
-        if (radio.sendWithRetry(theNodeID, "ACK TEST", 8, 0))  // 0 = only 1 attempt, no retries
-          Serial.print("ok!");
-        else Serial.print("nothing");
-      }
     }
-    Serial.println();
   }
 }
+
+void parseValve(char* payload, int i) {
+  struct valve v;
+  v.addr = atoi(strtok(payload, "/"));
+  v.name = strtok(NULL, "/");
+  v.wanted = atof(strtok(NULL, "/"));
+  v.real = atof(strtok(NULL, "/"));
+  valves[i] = v;
+  Serial.print("Name: ");
+  Serial.println(valves[i].name);
+}
+

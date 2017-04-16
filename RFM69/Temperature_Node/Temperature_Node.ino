@@ -49,11 +49,16 @@
 #define BUTTON_INT      1 //user button on interrupt 1 (D3)
 #define BUTTON_PIN      3 //user button on interrupt 1 (D3)
 
+// serial resistor: the smaller the value the higher the measured temperature
+#define SERIAL_RESISTANCE 8585
+// Number of intervals (8s) to sleep between measuring and transmitting
+#define SLEEP_INTERVALS  15
+
 #define DEBUG false
 
 RFM69 radio;
 
-SmoothThermistor smoothThermistor(A2, ADC_SIZE_10_BIT, 10000, 10160);
+SmoothThermistor smoothThermistor(A2, ADC_SIZE_10_BIT, 10000, SERIAL_RESISTANCE);
 #define THERMISTOR_POWER 4
 
 #define READVCC_IN      1
@@ -61,8 +66,10 @@ SmoothThermistor smoothThermistor(A2, ADC_SIZE_10_BIT, 10000, 10160);
 float vout = 0.0;
 float vin = 0.0;
 float raw_voltage = 0.0;
-float R1 = 479600.0;
-float R2 = 46230.0;
+//float R1 = 479600.0;
+float R1 = 470000.0;
+//float R2 = 46230.0;
+float R2 = 59000.0;
 bod_t BOD = BOD_OFF;
 
 // the setup contains the start-up procedure and some useful serial data
@@ -74,6 +81,7 @@ void setup() {
   sprintf(buff, "\nListening at %d Mhz...", FREQUENCY==RF69_433MHZ ? 433 : FREQUENCY==RF69_868MHZ ? 868 : 915);
   Serial.println(buff);
   Serial.flush();
+  analogReference(DEFAULT);
   pinMode(THERMISTOR_POWER, OUTPUT);
   pinMode(READVCC_SWITCH, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
@@ -93,7 +101,7 @@ void handleButton()
   mainEventFlags |= FLAG_INTERRUPT;
 }
 
-int is_minute = 12;
+int is_minute = SLEEP_INTERVALS;
 
 void loop() {
   //******** THIS IS INTERRUPT BASED DEBOUNCING FOR BUTTON ATTACHED TO D3 (INTERRUPT 1)
@@ -107,7 +115,7 @@ void loop() {
     }
   }
 
-  if (buttonPressed || is_minute == 12)
+  if (buttonPressed || is_minute == SLEEP_INTERVALS)
   {
     is_minute = 0;
     if (DEBUG == true) {
@@ -147,6 +155,7 @@ void loop() {
 float getTemperature() {
     
     digitalWrite(THERMISTOR_POWER, HIGH);
+    delay(50);
     float t = smoothThermistor.temperature();
     digitalWrite(THERMISTOR_POWER, LOW);
     return t;
@@ -155,8 +164,13 @@ float getTemperature() {
 float getVoltage() {
 
     digitalWrite(READVCC_SWITCH, HIGH);
-    delay(10);
-    raw_voltage = analogRead(READVCC_IN);
+    delay(50);
+    byte samples = 10;
+    raw_voltage = 0.0;
+    for (byte i=0; i < samples; i++) {
+      raw_voltage += analogRead(READVCC_IN);;
+    }
+    raw_voltage /= samples;
     vout = (raw_voltage * readVcc() / 1000) / 1024.0;
     digitalWrite(READVCC_SWITCH, LOW);
     vin = vout / (R2/(R1+R2));

@@ -30,6 +30,8 @@
 #include <SPI.h>           //included with Arduino IDE install (www.arduino.cc)
 #include <LowPower.h>       
 #include <SmoothThermistor.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 //*********************************************************************************************
 // *********** IMPORTANT SETTINGS - YOU MUST CHANGE/ONFIGURE TO FIT YOUR HARDWARE *************
@@ -56,6 +58,10 @@ RFM69 radio;
 SmoothThermistor smoothThermistor(A2, ADC_SIZE_10_BIT, 10000, 10160);
 #define THERMISTOR_POWER 4
 
+#define ONE_WIRE_BUS 7
+OneWire ourWire(ONE_WIRE_BUS);
+DallasTemperature dallasSensor(&ourWire);
+
 #define READVCC_IN      1
 #define READVCC_SWITCH  5
 float vout = 0.0;
@@ -80,6 +86,8 @@ void setup() {
   digitalWrite(THERMISTOR_POWER, LOW);
   digitalWrite(READVCC_SWITCH, LOW);
   digitalWrite(BUTTON_PIN, LOW);
+  dallasSensor.begin();
+  adresseAusgeben();
   attachInterrupt(BUTTON_INT, handleButton, RISING);
 }
 
@@ -148,6 +156,14 @@ float getTemperature() {
     
     digitalWrite(THERMISTOR_POWER, HIGH);
     float t = smoothThermistor.temperature();
+
+    dallasSensor.requestTemperatures();
+    float dt = dallasSensor.getTempCByIndex(0);
+
+    Serial.print(t);
+    Serial.print(" ");
+    Serial.println(dt);
+    
     digitalWrite(THERMISTOR_POWER, LOW);
     return t;
 }
@@ -174,4 +190,33 @@ long readVcc() {
   result |= ADCH<<8;
   result = 1126400L / result;
   return result;
+}
+
+void adresseAusgeben(void) {
+  byte i;
+  byte present = 0;
+  byte data[12];
+  byte addr[8];
+
+  Serial.print("Suche 1-Wire-Devices...\n\r");// "\n\r" is NewLine 
+  while(ourWire.search(addr)) {
+    Serial.print("\n\r\n\r1-Wire-Device gefunden mit Adresse:\n\r");
+    for( i = 0; i < 8; i++) {
+      Serial.print("0x");
+      if (addr[i] < 16) {
+        Serial.print('0');
+      }
+      Serial.print(addr[i], HEX);
+      if (i < 7) {
+        Serial.print(", ");
+      }
+    }
+    if ( OneWire::crc8( addr, 7) != addr[7]) {
+      Serial.print("CRC is not valid!\n\r");
+      return;
+    }
+  }
+  Serial.println();
+  ourWire.reset_search();
+  return;
 }
