@@ -35,6 +35,7 @@ bool promiscuousMode = false; //set to 'true' to sniff all packets on the same n
 byte ackCount = 0;
 uint32_t packetCount = 0;
 const char* COMMAND_GET_VALVES = "V";
+const char* COMMAND_SET_VALVES = "S";
 const char* END_OF_TRANSMISSION = "EOT";
 
 // encoder
@@ -60,6 +61,7 @@ const byte MODE_REQUEST_VALVES = 0x01;
 const byte MODE_GET_VALVES = 0x02;
 const byte MODE_HAS_VALVES = 0x04;
 const byte MODE_SHOW_VALVE = 0x08;
+const byte MODE_SET_VALVE = 0x10;
 
 // Menu
 ValvesMenu *menu = null;
@@ -67,7 +69,7 @@ ValvesMenu *menu = null;
 void setup() {
 
   //DEBUG |= DEBUG_RADIO;
-  DEBUG |= DEBUG_ROTATION;
+//  DEBUG |= DEBUG_ROTATION;
 
   Serial.begin(SERIAL_BAUD);
   delay(10);
@@ -150,6 +152,7 @@ void powerDown() {
   active = false;
   Serial.println("Sleep...");
   Serial.flush();
+  radio.sleep();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 }
 
@@ -309,6 +312,17 @@ void handleClick() {
       }
     }
   }
+  if (MODE & MODE_SHOW_VALVE) {
+    ClickEncoder::Button b = encoder->getButton();
+    if (b != ClickEncoder::Open) {
+      resetMillis();
+      if (b == ClickEncoder::Clicked) {
+        MODE &= ~MODE_SHOW_VALVE;
+        MODE |= MODE_SET_VALVE;
+        setValve();
+      }
+    }
+  }
 }
 
 void timerIsr() {
@@ -331,6 +345,22 @@ void requestValves() {
     Serial.print("ok!");
   }
   MODE &= ~MODE_REQUEST_VALVES;
+}
+
+void setValve() {
+  Serial.println("Requesting set Valves");
+  String _payload;
+  _payload = "G/S ";
+  _payload += menu->current()->addr();
+  _payload += " ";
+  _payload += menu->current()->wanted();
+  Serial.print("Set request: ");Serial.println(_payload);
+  char payload[_payload.length() + 1];
+  _payload.toCharArray(payload, sizeof(payload));
+  if (radio.sendWithRetry(GATEWAYID, payload, sizeof(payload))) {
+    Serial.print("ok!");
+  }
+  MODE &= ~MODE_SET_VALVE;
 }
 
 // Radio
