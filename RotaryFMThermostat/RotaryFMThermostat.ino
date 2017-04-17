@@ -68,7 +68,7 @@ void setup() {
 
   //DEBUG |= DEBUG_RADIO;
   DEBUG |= DEBUG_ROTATION;
-  
+
   Serial.begin(SERIAL_BAUD);
   delay(10);
 
@@ -178,17 +178,39 @@ void writeDisplay() {
   } else if (MODE & MODE_SHOW_VALVE) {
 
     float wanted = menu->current()->wanted();
-
-    lcd.printString("----------------", 0, 0);
     byte x_offset = 5;
     byte x_begin = 0;
-    for (x_begin; x_begin < x_offset; x_begin++) {
-      lcd.printString(".", x_begin, 3);
+
+    // Header
+    char *name = menu->current()->name();
+    int n_length = strlen(name);
+
+    lcd.printString("- ", x_begin, 0);
+    x_offset = 2;
+    lcd.printString(name, x_offset, 0);
+    x_offset += n_length;
+    lcd.printString(" ", x_offset, 0);
+    x_offset++;
+    x_offset += lcd.printNumber(menu->current()->real(), 1, x_offset, 0);
+    lcd.printString(" ", x_offset, 0);
+    x_offset++;
+    for (x_offset; x_offset < 16; x_offset++) {
+      lcd.printString("-", x_offset, 0);
+    }
+
+    // Content
+    for (x_offset = 0; x_offset < 6; x_offset++) {
+      lcd.printString(" ", x_offset, 3);
     }
     x_offset += lcd.printNumber(wanted, 1, x_offset, 3);
-    for (x_offset; x_offset < 16; x_offset++) {
-      lcd.printString(",", x_offset, 3);
+    if (wanted - (int)wanted == 0) {
+      lcd.printString(".0", x_offset, 3);
+      x_offset += 2;
     }
+    for (x_offset; x_offset < 16; x_offset++) {
+      lcd.printString(" ", x_offset, 3);
+    }
+
     lcd.printString("----------------", 0, 6);
   }
 
@@ -261,7 +283,7 @@ void handleRotation() {
     }
   } else if (MODE & MODE_SHOW_VALVE) {
     Valve * current = menu->current();
-    int last = current->wanted();
+    float last = current->wanted();
     float wanted = (*current) += encoder->getValue();
     if (wanted != last) {
       resetMillis();
@@ -340,7 +362,9 @@ void receive() {
       payload[radio.DATALEN] = '\0';
 
       if (strcmp(payload, END_OF_TRANSMISSION) == 0) {
-        Serial.println("EOT");
+        if (DEBUG & DEBUG_RADIO) {
+          Serial.println("EOT");
+        }
         if (MODE & MODE_GET_VALVES) {
           MODE &= ~MODE_GET_VALVES;
           MODE |= MODE_HAS_VALVES;
@@ -366,13 +390,15 @@ void parseValve(char* payload) {
   char *name = strtok(NULL, "/");
   float wanted = atof(strtok(NULL, "/"));
   float real = atof(strtok(NULL, "/"));
-  Serial.print("Name: ");
-  Serial.println(name);
+  if (DEBUG & DEBUG_RADIO) {
+    Serial.print("Name: ");
+    Serial.println(name);
+  }
   menu->addItem(name, addr, wanted, real);
 }
 
 int freeRam () {
-  extern int __heap_start, *__brkval; 
-  int v; 
-  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
 }
