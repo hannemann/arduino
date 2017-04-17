@@ -45,6 +45,7 @@ int16_t last, value;
 
 byte DEBUG = 0;
 const byte DEBUG_RADIO = 0x01;
+const byte DEBUG_ROTATION = 0x02;
 
 // OLED
 byte DISPLAY_MODE = 0;
@@ -58,6 +59,7 @@ byte MODE = 0;
 const byte MODE_REQUEST_VALVES = 0x01;
 const byte MODE_GET_VALVES = 0x02;
 const byte MODE_HAS_VALVES = 0x04;
+const byte MODE_SHOW_VALVE = 0x08;
 
 // Menu
 ValvesMenu *menu = null;
@@ -65,6 +67,7 @@ ValvesMenu *menu = null;
 void setup() {
 
   //DEBUG |= DEBUG_RADIO;
+  DEBUG |= DEBUG_ROTATION;
   
   Serial.begin(SERIAL_BAUD);
   delay(10);
@@ -141,10 +144,10 @@ void powerDown() {
   detachEncoder();
   lcd.clearDisplay();
   lcd.setDisplayOff();
-  MODE &= ~MODE_HAS_VALVES;
+  MODE = 0x00;
+  DISPLAY_MODE = 0x00;
   delete menu;
   active = false;
-  DISPLAY_MODE &= ~DISPLAY_MODE_ON;
   Serial.println("Sleep...");
   Serial.flush();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
@@ -157,7 +160,7 @@ void writeDisplay() {
     lcd.clearDisplay();
   }
 
-  if (!(MODE & MODE_HAS_VALVES)) {
+  if (MODE & MODE_REQUEST_VALVES) {
     lcd.printString("...loading", 0, 0);
     Serial.print("RAM: ");
     Serial.println(freeRam());
@@ -172,9 +175,9 @@ void writeDisplay() {
       lcd.printString(menu->item(i).name(), 2 , i);
     }
 
-  } else {
+  } else if (MODE & MODE_SHOW_VALVE) {
 
-    long val = menu->index();
+    float wanted = menu->current()->wanted();
 
     lcd.printString("----------------", 0, 0);
     byte x_offset = 5;
@@ -182,7 +185,7 @@ void writeDisplay() {
     for (x_begin; x_begin < x_offset; x_begin++) {
       lcd.printString(".", x_begin, 3);
     }
-    x_offset += lcd.printNumber(val, x_offset, 3);
+    x_offset += lcd.printNumber(wanted, 1, x_offset, 3);
     for (x_offset; x_offset < 16; x_offset++) {
       lcd.printString(",", x_offset, 3);
     }
@@ -249,14 +252,21 @@ void resetValue() {
 */
 void handleRotation() {
 
-  int index = (*menu) += encoder->getValue();
-
-  if (index != last) {
-    last = index;
-    resetMillis();
-    Serial.print("Encoder Value: ");
-    Serial.println(index);
-    DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
+  if (MODE & MODE_HAS_VALVES) {
+    int last = menu->index();
+    int index = (*menu) += encoder->getValue();
+    if (index != last) {
+      resetMillis();
+      DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
+    }
+  } else if (MODE & MODE_SHOW_VALVE) {
+    Valve * current = menu->current();
+    int last = current->wanted();
+    float wanted = (*current) += encoder->getValue();
+    if (wanted != last) {
+      resetMillis();
+      DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
+    }
   }
 }
 
@@ -265,22 +275,16 @@ void handleRotation() {
 */
 void handleClick() {
 
-  ClickEncoder::Button b = encoder->getButton();
-  if (b != ClickEncoder::Open) {
-    resetMillis();
-    Serial.print("Button: ");
-#define VERBOSECASE(label) case label: Serial.println(#label); break;
-    switch (b) {
-        VERBOSECASE(ClickEncoder::Pressed);
-        VERBOSECASE(ClickEncoder::Held)
-        VERBOSECASE(ClickEncoder::Released)
-        VERBOSECASE(ClickEncoder::Clicked)
-      case ClickEncoder::DoubleClicked:
-        Serial.println("ClickEncoder::DoubleClicked");
-        encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
-        Serial.print("  Acceleration is ");
-        Serial.println((encoder->getAccelerationEnabled()) ? "enabled" : "disabled");
-        break;
+  if (MODE & MODE_HAS_VALVES) {
+    ClickEncoder::Button b = encoder->getButton();
+    if (b != ClickEncoder::Open) {
+      resetMillis();
+      if (b == ClickEncoder::Clicked) {
+        MODE &= ~MODE_HAS_VALVES;
+        MODE |= MODE_SHOW_VALVE;
+        DISPLAY_MODE |= DISPLAY_MODE_CLEAR;
+        DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
+      }
     }
   }
 }

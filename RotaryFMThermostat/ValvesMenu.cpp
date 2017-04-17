@@ -1,6 +1,21 @@
 #include <Arduino.h>
 #include "ValvesMenu.h"
 
+void Valve::wanted(float w) {
+  _wanted = w / 0.5;
+}
+
+float Valve::wanted() {
+  return _wanted * 0.5;
+}
+
+float Valve::operator+=(int i) {
+  _wanted += i;
+	if (_wanted < 0) _wanted = 0;
+	if (_wanted >= _max) _wanted = _max;
+	return _wanted * 0.5;
+}
+
 ValvesMenu::ValvesMenu() {
 };
 
@@ -35,6 +50,11 @@ void ValvesMenu::addItem(char name[10], int addr, float wanted, float real) {
 
 Valve ValvesMenu::item(int i) {
 	return items[i];
+}
+
+Valve * ValvesMenu::current() {
+  Valve *item = &items[_index];
+	return item;
 }
 
 void ValvesMenu::reset() {

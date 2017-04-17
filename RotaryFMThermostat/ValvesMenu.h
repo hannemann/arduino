@@ -5,19 +5,21 @@ class Valve {
 		int _index;
 		char _name[10];
 		int _addr;
-		float _wanted;
+		int _wanted;
 		float _real;
+		int _max = 30 / 0.5;
 	public:
 		void index(int i) { _index = i; };
 		int index() { return _index; };
 		void addr(int a) { _addr = a; };
 		int addr() { return _addr; };
-		void wanted(float w) { _wanted = w; };
-		float wanted() { return _wanted; };
+		void wanted(float w);
+		float wanted();
 		void real(float r) { _real = r; };
 		float real() { return _real; };
 		void name(char n[10]) { strcpy(_name, n); };
 		char * name() { return _name; };
+		float operator+=(int i);
 };
 
 class ValvesMenu {
@@ -38,4 +40,5 @@ class ValvesMenu {
 		void reset();
 		int operator+=(int i);
 		bool isCurrent(int i);
+		Valve * current();
 };
