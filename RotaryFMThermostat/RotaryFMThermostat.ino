@@ -10,9 +10,9 @@
 #include <OLED_I2C_128x64_Monochrome.h>
 #include <Wire.h>
 
-#include "SimpleMenu.h"
+#include "ValvesMenu.h"
 
-// peripheral 
+// peripheral
 #define BUTTON_PIN 3
 #define BUTTON_INT digitalPinToInterrupt(BUTTON_PIN)
 #define TIMOUT_TRSHLD 5000
@@ -27,12 +27,12 @@
 #define ENABLE_ATC    //comment out this line to disable AUTO TRANSMISSION CONTROL
 
 #ifdef ENABLE_ATC
-  RFM69_ATC radio;
+RFM69_ATC radio;
 #else
-  RFM69 radio;
+RFM69 radio;
 #endif
 bool promiscuousMode = false; //set to 'true' to sniff all packets on the same network
-byte ackCount=0;
+byte ackCount = 0;
 uint32_t packetCount = 0;
 const char* COMMAND_GET_VALVES = "V";
 const char* END_OF_TRANSMISSION = "EOT";
@@ -43,54 +43,51 @@ volatile bool active = true;
 unsigned long oldMillis;
 int16_t last, value;
 
+byte DEBUG = 0;
+const byte DEBUG_RADIO = 0x01;
+
 // OLED
-unsigned char DISPLAY_MODE = 0;
-const unsigned char DISPLAY_MODE_ON = 0x01;
-const unsigned char DISPLAY_MODE_UPDATE = 0x02;
+byte DISPLAY_MODE = 0;
+const byte DISPLAY_MODE_ON = 0x01;
+const byte DISPLAY_MODE_UPDATE = 0x02;
+const byte DISPLAY_MODE_CLEAR = 0x04;
 
 #define FILLARRAY(a,n) a[0]=n, memcpy( ((char*)a)+sizeof(a[0]), a, sizeof(a)-sizeof(a[0]) );
 
-unsigned char MODE = 0;
-const unsigned char MODE_REQUEST_VALVES = 0x01;
-const unsigned char MODE_GET_VALVES = 0x02;
-const unsigned char MODE_HAS_VALVES = 0x04;
-
-const int MAX_VALVES = 20;
-struct valve {
-  int addr;
-  char *name;
-  float wanted;
-  float real;
-};
-struct valve valves[MAX_VALVES];
-int valvesCount;
+byte MODE = 0;
+const byte MODE_REQUEST_VALVES = 0x01;
+const byte MODE_GET_VALVES = 0x02;
+const byte MODE_HAS_VALVES = 0x04;
 
 // Menu
-SimpleMenu *menu = null;
+ValvesMenu *menu = null;
 
 void setup() {
+
+  //DEBUG |= DEBUG_RADIO;
+  
   Serial.begin(SERIAL_BAUD);
   delay(10);
-  
-  radio.initialize(FREQUENCY,NODEID,NETWORKID);
+
+  radio.initialize(FREQUENCY, NODEID, NETWORKID);
   encoder = new ClickEncoder(A1, A0, BUTTON_PIN, 4);
   radio.encrypt(ENCRYPTKEY);
   radio.promiscuous(promiscuousMode);
   char buff[50];
-  sprintf(buff, "\nListening at %d Mhz...", FREQUENCY==RF69_433MHZ ? 433 : FREQUENCY==RF69_868MHZ ? 868 : 915);
+  sprintf(buff, "\nListening at %d Mhz...", FREQUENCY == RF69_433MHZ ? 433 : FREQUENCY == RF69_868MHZ ? 868 : 915);
   Serial.println(buff);
 #ifdef ENABLE_ATC
   Serial.println("RFM69_ATC Enabled (Auto Transmission Control)");
 #endif
 
   Timer1.initialize(1000);
-  Serial.print("Observing button on Pin ");Serial.print(BUTTON_PIN);
-  Serial.print(" (Interrupt ");Serial.print(BUTTON_INT);Serial.println(")");
-  
+  Serial.print("Observing button on Pin "); Serial.print(BUTTON_PIN);
+  Serial.print(" (Interrupt "); Serial.print(BUTTON_INT); Serial.println(")");
+
   // OLED
   lcd.initialize();
   lcd.rotateDisplay180();
-  
+
   activate();
 }
 
@@ -100,11 +97,11 @@ void loop() {
 
     if (!(DISPLAY_MODE & DISPLAY_MODE_ON)) {
       DISPLAY_MODE |= DISPLAY_MODE_ON;
-      menu = new SimpleMenu();
+      menu = new ValvesMenu();
       writeDisplay();
       lcd.setDisplayOn();
     }
-    
+
     handleRotation();
     handleClick();
 
@@ -117,14 +114,14 @@ void loop() {
     if (DISPLAY_MODE & DISPLAY_MODE_UPDATE) {
       writeDisplay();
     }
-    
+
     if (timedOut()) powerDown();
   }
 }
 
 /**
- * activate
- */
+   activate
+*/
 void activate() {
   detachBtn();
   attachEncoder();
@@ -132,16 +129,17 @@ void activate() {
   resetMillis();
   active = true;
   MODE |= MODE_REQUEST_VALVES;
-  
+
   Serial.println("Active...");
 }
 
 /**
- * powerDown
- */
+   powerDown
+*/
 void powerDown() {
   attachBtn();
   detachEncoder();
+  lcd.clearDisplay();
   lcd.setDisplayOff();
   MODE &= ~MODE_HAS_VALVES;
   delete menu;
@@ -149,15 +147,31 @@ void powerDown() {
   DISPLAY_MODE &= ~DISPLAY_MODE_ON;
   Serial.println("Sleep...");
   Serial.flush();
-  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); 
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 }
 
 void writeDisplay() {
 
-  lcd.clearDisplay();
+  if (DISPLAY_MODE & DISPLAY_MODE_CLEAR) {
+    DISPLAY_MODE &= ~DISPLAY_MODE_CLEAR;
+    lcd.clearDisplay();
+  }
 
   if (!(MODE & MODE_HAS_VALVES)) {
     lcd.printString("...loading", 0, 0);
+    Serial.print("RAM: ");
+    Serial.println(freeRam());
+  } else if (MODE & MODE_HAS_VALVES) {
+
+    for (byte i = 0; i < menu->length(); i++) {
+      if (menu->isCurrent(menu->item(i).index())) {
+        lcd.printString(". ", 0, i);
+      } else {
+        lcd.printString("  ", 0, i);
+      }
+      lcd.printString(menu->item(i).name(), 2 , i);
+    }
+
   } else {
 
     long val = menu->index();
@@ -165,11 +179,11 @@ void writeDisplay() {
     lcd.printString("----------------", 0, 0);
     byte x_offset = 5;
     byte x_begin = 0;
-    for (x_begin;x_begin<x_offset;x_begin++) {
+    for (x_begin; x_begin < x_offset; x_begin++) {
       lcd.printString(".", x_begin, 3);
     }
     x_offset += lcd.printNumber(val, x_offset, 3);
-    for (x_offset;x_offset<16;x_offset++) {
+    for (x_offset; x_offset < 16; x_offset++) {
       lcd.printString(",", x_offset, 3);
     }
     lcd.printString("----------------", 0, 6);
@@ -179,64 +193,64 @@ void writeDisplay() {
 }
 
 /**
- * attach button interrupt
- */
+   attach button interrupt
+*/
 void attachBtn() {
   attachInterrupt(BUTTON_INT, buttonIsr, RISING);
 }
 
 /**
- * detach button interrupt
- */
+   detach button interrupt
+*/
 void detachBtn() {
   detachInterrupt(BUTTON_INT);
 }
 
 /**
- * attach encoder timer interrupt
- */
+   attach encoder timer interrupt
+*/
 void attachEncoder() {
   Timer1.start();
   Timer1.attachInterrupt(timerIsr);
 }
 
 /**
- * detach encoder timer interrupt
- */
+   detach encoder timer interrupt
+*/
 void detachEncoder() {
   Timer1.stop();
   Timer1.detachInterrupt();
 }
 
 /**
- * reset stored millis
- */
+   reset stored millis
+*/
 void resetMillis() {
   oldMillis = millis();
 }
 
 /**
- * determine if encoder wasnt active
- */
+   determine if encoder wasnt active
+*/
 bool timedOut() {
   return millis() - oldMillis > TIMOUT_TRSHLD;
 }
 
 /**
- * reset encoder value
- */
+   reset encoder value
+*/
 void resetValue() {
   menu->index(0);
   last = 0;
 }
 
 /**
- * handle encoder rotation
- */
+   handle encoder rotation
+*/
 void handleRotation() {
 
   int index = (*menu) += encoder->getValue();
-  
+
   if (index != last) {
     last = index;
     resetMillis();
@@ -247,28 +261,28 @@ void handleRotation() {
 }
 
 /**
- * handle encoder click
- */
+   handle encoder click
+*/
 void handleClick() {
-  
+
   ClickEncoder::Button b = encoder->getButton();
   if (b != ClickEncoder::Open) {
     resetMillis();
     Serial.print("Button: ");
-    #define VERBOSECASE(label) case label: Serial.println(#label); break;
+#define VERBOSECASE(label) case label: Serial.println(#label); break;
     switch (b) {
-      VERBOSECASE(ClickEncoder::Pressed);
-      VERBOSECASE(ClickEncoder::Held)
-      VERBOSECASE(ClickEncoder::Released)
-      VERBOSECASE(ClickEncoder::Clicked)
+        VERBOSECASE(ClickEncoder::Pressed);
+        VERBOSECASE(ClickEncoder::Held)
+        VERBOSECASE(ClickEncoder::Released)
+        VERBOSECASE(ClickEncoder::Clicked)
       case ClickEncoder::DoubleClicked:
-          Serial.println("ClickEncoder::DoubleClicked");
-          encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
-          Serial.print("  Acceleration is ");
-          Serial.println((encoder->getAccelerationEnabled()) ? "enabled" : "disabled");
+        Serial.println("ClickEncoder::DoubleClicked");
+        encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
+        Serial.print("  Acceleration is ");
+        Serial.println((encoder->getAccelerationEnabled()) ? "enabled" : "disabled");
         break;
     }
-  } 
+  }
 }
 
 void timerIsr() {
@@ -277,7 +291,7 @@ void timerIsr() {
 
 void buttonIsr() {
   if (!active) {
-    activate(); 
+    activate();
   }
 }
 
@@ -285,7 +299,7 @@ void requestValves() {
   Serial.println("Requesting Valves");
   String _payload;
   _payload = "G/V";
-  char payload[_payload.length()+1];
+  char payload[_payload.length() + 1];
   _payload.toCharArray(payload, sizeof(payload));
   if (radio.sendWithRetry(GATEWAYID, payload, sizeof(payload))) {
     Serial.print("ok!");
@@ -295,22 +309,22 @@ void requestValves() {
 
 // Radio
 void receive() {
-  
+
   if (radio.receiveDone())
   {
     resetMillis();
-    Serial.print("Data received: ");
-    for (byte i = 0; i < radio.DATALEN; i++) {
-      char c = (char)radio.DATA[i];
-      Serial.print(c);
+    if (DEBUG & DEBUG_RADIO) {
+      Serial.print("Data received: ");
+      for (byte i = 0; i < radio.DATALEN; i++) {
+        char c = (char)radio.DATA[i];
+        Serial.print(c);
+      }
+      Serial.println();
     }
-    Serial.println();
     if (radio.DATALEN == 1) {
       if (*COMMAND_GET_VALVES == (char)radio.DATA[0]) {
         Serial.println("Fetch valves...");
-        struct valve valves[MAX_VALVES];
         MODE |= MODE_GET_VALVES;
-        valvesCount = 0;
       }
     } else {
 
@@ -327,15 +341,15 @@ void receive() {
           MODE &= ~MODE_GET_VALVES;
           MODE |= MODE_HAS_VALVES;
           DISPLAY_MODE |= DISPLAY_MODE_UPDATE;
+          DISPLAY_MODE |= DISPLAY_MODE_CLEAR;
         }
       }
 
       if (MODE & MODE_GET_VALVES) {
-        parseValve(payload, valvesCount);
-        valvesCount++;
+        parseValve(payload);
       }
     }
-    
+
     if (radio.ACKRequested())
     {
       radio.sendACK();
@@ -343,14 +357,18 @@ void receive() {
   }
 }
 
-void parseValve(char* payload, int i) {
-  struct valve v;
-  v.addr = atoi(strtok(payload, "/"));
-  v.name = strtok(NULL, "/");
-  v.wanted = atof(strtok(NULL, "/"));
-  v.real = atof(strtok(NULL, "/"));
-  valves[i] = v;
+void parseValve(char* payload) {
+  int addr = atoi(strtok(payload, "/"));
+  char *name = strtok(NULL, "/");
+  float wanted = atof(strtok(NULL, "/"));
+  float real = atof(strtok(NULL, "/"));
   Serial.print("Name: ");
-  Serial.println(valves[i].name);
+  Serial.println(name);
+  menu->addItem(name, addr, wanted, real);
 }
 
+int freeRam () {
+  extern int __heap_start, *__brkval; 
+  int v; 
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
